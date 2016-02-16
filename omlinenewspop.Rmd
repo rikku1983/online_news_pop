@@ -1,0 +1,376 @@
+---
+title: "STAT5371_MT_Project"
+author: "Li Sun"
+date: "Wednesday, October 21, 2015"
+output: pdf_document
+---
+
+##DATA SOURCE
+Data is from UCI website http://archive.ics.uci.edu/ml/datasets/Online+News+Popularity
+This is an data analysis on online news popularity by using regression model.
+
+Attribute Information: 
+0. url: URL of the article (non-predictive) 
+1. timedelta: Days between the article publication and the dataset acquisition (non-predictive) 
+2. n_tokens_title: Number of words in the title 
+3. n_tokens_content: Number of words in the content 
+4. n_unique_tokens: Rate of unique words in the content 
+5. n_non_stop_words: Rate of non-stop words in the content 
+6. n_non_stop_unique_tokens: Rate of unique non-stop words in the content 
+7. num_hrefs: Number of links 
+8. num_self_hrefs: Number of links to other articles published by Mashable 
+9. num_imgs: Number of images 
+10. num_videos: Number of videos 
+11. average_token_length: Average length of the words in the content 
+12. num_keywords: Number of keywords in the metadata 
+13. data_channel_is_lifestyle: Is data channel 'Lifestyle'? 
+14. data_channel_is_entertainment: Is data channel 'Entertainment'? 
+15. data_channel_is_bus: Is data channel 'Business'? 
+16. data_channel_is_socmed: Is data channel 'Social Media'? 
+17. data_channel_is_tech: Is data channel 'Tech'? 
+18. data_channel_is_world: Is data channel 'World'? 
+19. kw_min_min: Worst keyword (min. shares) 
+20. kw_max_min: Worst keyword (max. shares) 
+21. kw_avg_min: Worst keyword (avg. shares) 
+22. kw_min_max: Best keyword (min. shares) 
+23. kw_max_max: Best keyword (max. shares) 
+24. kw_avg_max: Best keyword (avg. shares) 
+25. kw_min_avg: Avg. keyword (min. shares) 
+26. kw_max_avg: Avg. keyword (max. shares) 
+27. kw_avg_avg: Avg. keyword (avg. shares) 
+28. self_reference_min_shares: Min. shares of referenced articles in Mashable 
+29. self_reference_max_shares: Max. shares of referenced articles in Mashable 
+30. self_reference_avg_sharess: Avg. shares of referenced articles in Mashable 
+31. weekday_is_monday: Was the article published on a Monday? 
+32. weekday_is_tuesday: Was the article published on a Tuesday? 
+33. weekday_is_wednesday: Was the article published on a Wednesday? 
+34. weekday_is_thursday: Was the article published on a Thursday? 
+35. weekday_is_friday: Was the article published on a Friday? 
+36. weekday_is_saturday: Was the article published on a Saturday? 
+37. weekday_is_sunday: Was the article published on a Sunday? 
+38. is_weekend: Was the article published on the weekend? 
+39. LDA_00: Closeness to LDA topic 0 
+40. LDA_01: Closeness to LDA topic 1 
+41. LDA_02: Closeness to LDA topic 2 
+42. LDA_03: Closeness to LDA topic 3 
+43. LDA_04: Closeness to LDA topic 4 
+44. global_subjectivity: Text subjectivity 
+45. global_sentiment_polarity: Text sentiment polarity 
+46. global_rate_positive_words: Rate of positive words in the content 
+47. global_rate_negative_words: Rate of negative words in the content 
+48. rate_positive_words: Rate of positive words among non-neutral tokens 
+49. rate_negative_words: Rate of negative words among non-neutral tokens 
+50. avg_positive_polarity: Avg. polarity of positive words 
+51. min_positive_polarity: Min. polarity of positive words 
+52. max_positive_polarity: Max. polarity of positive words 
+53. avg_negative_polarity: Avg. polarity of negative words 
+54. min_negative_polarity: Min. polarity of negative words 
+55. max_negative_polarity: Max. polarity of negative words 
+56. title_subjectivity: Title subjectivity 
+57. title_sentiment_polarity: Title polarity 
+58. abs_title_subjectivity: Absolute subjectivity level 
+59. abs_title_sentiment_polarity: Absolute polarity level 
+60. shares: Number of shares (target)
+
+
+# Read in data and preprocess
+Data is read by read.csv function, and preprocessed by adjusting data type and remove "url" variable which will not be used in this analysis
+
+```{r, cache=TRUE}
+#read in data
+raw<-read.csv("OnlineNewsPopularity.csv")
+dim(raw)
+names(raw)
+#sapply(raw, class)
+raw[,61] <- as.numeric(raw[,61])
+raw <- raw[,-1]
+```
+
+Loading libraries
+```{r}
+suppressWarnings(library(ggplot2))
+suppressWarnings(library(reshape2))
+suppressWarnings(library(DAAG))
+#suppressWarnings(library(leaps))
+```
+
+# Specify questions
+Generally I want to check what attributes of a article will affect its popularity, in other word, what kind of articles are attracting eyes from general public. There are 60 columns, including one dependent variable which is "shares" and 59 independent ones. We want to take a look at these 59 variables first by Exploratory Data Analyasis (EDA).
+
+# EDA and Variables selection
+In this section, we take a look and the whole dataset and try to make it better fit regression analysis.
+
+##1. Data distributions
+Here I plot all the variable data by histogram to check the distributions.
+```{r, results='hide'}
+par(mfrow=c(3,4))
+for(i in 1:length(raw)){hist(raw[,i], xlab=names(raw)[i])}
+```
+After going over all the distributions of all individual variables, several problems identified
+
+a. outlier in var "n_unique_tokens", "n_non_stop_words", and "n_non_stop_unique_tokens", which might be due to typing error. We will remove that observation.
+```{r}
+raw <- raw[raw[,4]<1,]
+```
+
+b. Missing values are very troubling in this data set because they are coded as 0. So you have to judge if the 0 are missing or real data. By check the distributions, we found around 3000 observations with missing values in 9 different variables. We will remove all cases with missing values.
+```{r}
+for(i in c(11,20,44,45,46,48,49,50,53))raw <- raw[raw[,i]!=0,]
+```
+
+c. Skewed data. Lots of the variables are heavily right skewed, including the response "shares". So we will transform them to reduce the skewness. For those variables with all values bigger than 0, we use log, and other variable with 0, we use square root to transform them. 
+```{r}
+for(i in c(3,7,8,9,10,22,26:30,39:43,47, 60)){
+  if(!sum(raw[,i]==0)){raw[,i] <- log(raw[,i]); names(raw)[i] <- paste("log_",names(raw)[i], sep="")}
+  else{raw[,i] <- sqrt(raw[,i]); names(raw)[i] <- paste("sqrt_",names(raw)[i], sep="")}
+}
+```
+
+d. 19th, 21st, 23rd, 25th Variables contains negative values that cannot be explained by information available, so they will be removed
+```{r}
+raw <- raw[, -c(19,21,23,25)]
+```
+
+##2. Does subjects and publishing days of news matters?
+a. Subjects matters?
+```{r, echo=FALSE}
+raw$news_sub <- rep("other", nrow(raw))
+raw$news_sub[raw$data_channel_is_lifestyle==1] <- "lifeStyle"
+raw$news_sub[raw$data_channel_is_entertainment==1] <- "entertainment"
+raw$news_sub[raw$data_channel_is_bus==1] <- "bus"
+raw$news_sub[raw$data_channel_is_socmed==1] <- "socmed"
+raw$news_sub[raw$data_channel_is_tech==1] <- "tech"
+raw$news_sub[raw$data_channel_is_world==1] <- "world"
+# plot
+p1 <- ggplot(data=raw, aes(as.factor(news_sub), log_shares))
+p1 + geom_boxplot()
+```
+As you see, all subjects look similar regarding share numbers. So I will remove the 7 variables about subjects. 
+
+b. Publishing Days might or might not affect shares, let's look at it.
+```{r}
+raw$news_day <- rep("Sunday", nrow(raw))
+raw$news_day[raw$weekday_is_monday==1] <- "Monday"
+raw$news_day[raw$weekday_is_tuesday==1] <- "Tuesday"
+raw$news_day[raw$weekday_is_wednesday==1] <- "Wednesday"
+raw$news_day[raw$weekday_is_thursday==1] <- "Thursday"
+raw$news_day[raw$weekday_is_friday==1] <- "Friday"
+raw$news_day[raw$weekday_is_saturday==1] <- "Saturday"
+#Check 
+p1 <- ggplot(data=raw, aes(as.factor(news_day), log_shares))
+p1 + geom_boxplot()
+```
+Publishing day didn't show much influence on shares neither. So I will get rid of all the indicators but leave "is_weekend" because I do see some difference bewtween weekdays and weekend data.
+```{r}
+#remove 7 publishing day var and 7 subject indicator var
+raw2 <- raw[,-c(13:18, 27:33, 57,58)]
+```
+
+##3. PCA analysis
+PCA analysis can tell us where the variance of our independent variables are from? How they form the shape of our data variance.
+```{r}
+x <- as.matrix(scale(raw2[,-43]))
+dim(x)
+corx <- cor(x)
+dim(corx)
+evd<-svd(corx)
+w <- x %*% evd$u
+pca2 <- as.data.frame(cbind(w[,1:4], raw2$log_shares))
+names(pca2) <- c("Component_1", "Component_2", "Component_3", "Component_4", "log_shares")
+#Map share on first two components
+pcaplot <- ggplot(aes(Component_1, Component_2, colour=log_shares), data=pca2)
+pcaplot + geom_point(alpha = 0.5) + scale_colour_gradient(limits=c(0, 14), low="white", high="red")
+#Map share on 3rd and 4th components
+pcaplot <- ggplot(aes(Component_3, Component_4, colour=log_shares), data=pca2)
+pcaplot + geom_point(alpha = 0.5) + scale_colour_gradient(limits=c(0, 14), low="white", high="red")
+```
+Conclusion, the variance of share number is not aligned with the first 4 major components of variance from independent variables.In other words, most of the infomation from our independent variables might not be related to our dependent variable. So there are too much non-relevant information we should get rid of.
+
+##4. Does all potential predictors are independent to each other and relevant to our dependent variable?
+I will use heatmap to check correlation matrix of the 43 left columns
+```{r}
+corm<-1-cor(raw2)
+heatmap(corm)
+```
+Let's further loot at the correlations of different variables with our dependenet variables.
+```{r}
+summary(corm[43,-43])
+qplot(1-corm[43,-43], binwidth=0.01, fill=..count.., geom="histogram", xlab="correlation")
+```
+Generally all the predictors have pretty low correlations with our log(shares). We have some variables have nearly 0 correlations with share numbers. Considering most variables relative low correlations, we will not exclude any variables because of low correlation.
+
+From the heatmap above, we can tell there indeed are some groups of variables which are pretty close to each other. Let's build the tree and cut it to get groups!
+```{r, fig.width=8, fig.height=8}
+hc <- hclust(dist(corm))
+par(mfrow=c(1,1))
+plot(hc)
+```
+
+```{r}
+y<-numeric()
+for(i in seq(0,2,0.02)){
+  y <- c(y, length(unique(cutree(hc,h=i))))
+}
+x <- seq(0,2,0.02)
+ggplot(aes(x=x,y=y), data=as.data.frame(cbind(x,y)))+geom_point()+labs(x="cutting at height", y="number of groups left")
+```
+According to those plots, I will maintain all 43 variables.
+
+# Exploratory Modeling
+I use all 43 variables to build a regression model and analyze it.
+```{r}
+raw2$is_weekend <- as.factor(raw2$is_weekend)
+xx <- raw2[,-43]
+yy <- raw2[,43]
+full <- lm(log_shares~ ., data=raw2)
+summary(full)
+```
+Very low R square around 0.122. So the data really does not contain the info about popularity of news? Remember I discard some info in the beginning about subjects of news. So what about in different subjects, do we have higher prediction power in each subject?
+```{r}
+sublist<-split(raw2, raw$news_sub)
+RsqrSub <- data.frame("sub"=names(sublist), "Rsqr"=rep(0,7))
+for(i in 1:7){
+  temp<-lm(log_shares~ ., data=sublist[[i]])
+  RsqrSub[i,2]<-summary(temp)$adj.r.squared
+}
+ggplot(aes(x=factor(sub), y=Rsqr), data=RsqrSub) + geom_bar(stat="identity") + labs(x="news subjects", y="Adjusted R squared")
+```
+We do see some difference across different subjects. However, they are not high in general. The highest one is social media news. So I will only use the subset of news about social media to build a model for practise. 
+First start with full model and do some diagnositc plots
+```{r}
+social <- sublist[[5]]
+dim(social)
+socfull <- lm(log_shares ~ ., data=social) 
+summary(socfull)
+```
+We have two variables gives out NA in coeficients calculation, indicating those variables are linear combinations of other variables. So we will remove those two.
+```{r}
+social<-social[,names(social)!="n_non_stop_words"&names(social)!="rate_negative_words"]
+```
+Diagnostic plot
+```{r}
+par(mfrow=c(2,3))
+plot(socfull, which = c(1:6))
+```
+According to 6 diagnostic plots, the assumptions of spherical error and normal distributed error roughly hold. However outliers identified. So let's remove those observations
+```{r}
+outliers <- c(6384, 9708, 9772, 16687, 17138)
+soc<-social[!rownames(social) %in% outliers,]
+```
+# Model selection
+##1. Backwards model selection
+```{r}
+socfull <- lm(log_shares ~ ., data=soc) 
+backstep <- step(socfull, direction= "backward", trace = 0)
+#backstep$coefficients
+summary(lm(formula(backstep), data=soc))
+```
+Backwards elimination ends up with 20 variables left.
+
+##2. Foward model selection
+```{r}
+minfit <- lm(log_shares ~ 1, data=soc)
+forstep <- step(minfit, scope = formula(socfull), direction = "forward", trace = 0)
+summary(lm(formula(forstep), data=soc))
+```
+
+##3. Compare the coefieients contained in 2 models
+```{r}
+bc <- names(backstep$coefficients)
+fc <- names(forstep$coefficients)
+c <- unique(c(bc, fc))
+bcind <- c %in% bc
+fcind <- c %in% fc
+varcompare <- data.frame("Variables"=c, "backward"=bcind, "forward"=fcind)
+varcompare
+```
+
+##4. Correlations between those variable?
+```{r}
+designM <- soc[,names(soc) %in% c]
+heatmap(1-cor(designM))
+meltcor<-melt(cor(designM))
+meltcor <- meltcor[meltcor$value!=1,]
+meltcor <- meltcor[order(meltcor$value, decreasing =T),]
+names(meltcor) <- c("var1", "var2", "correlation")
+head(meltcor)
+```
+Let's add interacting terms to the existant models to generate several more models
+```{r}
+intfit1 <- update(backstep, .~.+sqrt_self_reference_avg_sharess:sqrt_self_reference_min_shares)
+intfit2 <- update(forstep, .~.+sqrt_self_reference_avg_sharess:sqrt_self_reference_min_shares)
+intfit3 <- update(forstep, .~.+abs_title_sentiment_polarity:title_subjectivity)
+intfit4 <- update(forstep, .~.+sqrt_self_reference_avg_sharess:sqrt_self_reference_min_shares+abs_title_sentiment_polarity:title_subjectivity)
+```
+
+##5. Compare all six models
+Now we have 6 models we need to compare. Lets look at their adjusted R squared first
+```{r}
+R2<-c(summary(backstep)$adj.r.squared,summary(forstep)$adj.r.squared,summary(intfit1)$adj.r.squared,summary(intfit2)$adj.r.squared,summary(intfit3)$adj.r.squared,summary(intfit4)$adj.r.squared)
+qplot(1:6, y=R2, geom="bar", stat="identity")
+```
+They are almost the same
+
+Now lets look at prediction power by cross validation of the six models
+```{r, fig.width=7, fig.height=4}
+modellist <- list(backstep, forstep, intfit1, intfit2, intfit3, intfit4)
+ms <- numeric()
+df <- numeric()
+for(i in 1:6){
+  cv <- suppressWarnings(CVlm(data=soc, modellist[[i]], m=6, printit=F))
+  ms <- c(ms, attributes(cv)$ms)
+  df <- c(df, attributes(cv)$df)
+}
+ms
+df
+```
+
+##6. What about using "leekasso"
+leekasso is a method chooses top 10 variables with least p-values in F-tests. Let's try this out
+```{r}
+y <- soc$log_shares
+x <- soc[,-41]
+x0 <- rep(1, nrow(x))
+n <- nrow(x)
+projM <- function(x){m <- x %*% solve(t(x) %*% x) %*% t(x); return(m)}
+Px0 <- projM(x0)
+pvals <- data.frame(var = names(x), pval = rep(0, ncol(x)))
+for(i in 1:ncol(x)){
+  xa <- cbind(x0, x[,i])
+  Pxa <- projM(xa)
+  MS1 <- t(y) %*% (Pxa - Px0) %*%y
+  MS2 <- t(y) %*% (diag(n) - Pxa) %*%y / (n-2)
+  fstat <- MS1/MS2
+  pval <- df(fstat, 1, n-2)
+  pvals[i,2] <- pval
+}
+pv <- pvals[order(pvals[,2], decreasing=F),]
+leekvar <- pv$var[1:10]
+leekdat <- cbind(x[,names(x) %in% leekvar], y)
+leekasso <-lm(y ~., data=leekdat)
+summary(leekasso)
+```
+This method gave me 16% R squared. Not as better as previous model. However, it only contains 10 models. I am now interested in how R squared will change along the number of best variables I chose
+
+```{r, cache=TRUE}
+arsq <- as.numeric()
+ordvar<- pvals[order(pvals[,2], decreasing=F),]
+for(i in 1:nrow(ordvar)){
+  tempdata <- cbind(x[,names(x) %in% ordvar[1:i,1]], y)
+  arsq <- c(arsq, summary(lm(y~., data=as.data.frame(tempdata)))$adj.r.squared)
+}
+qplot(x=1:ncol(x), y=arsq, geom="point", xlab="number of best variables", ylab = "adjusted R squared")
+```
+The R squared increased along the number of variable been involved but still cannot get over 20%.
+
+#Conclusion
+Fit the best model in my hand
+```{r}
+bestmodel <- modellist[order(ms)][[1]]
+summary(bestmodel)
+```
+
+This analysis is about online news popularity. I tried to explore the provided variables and find a linear model to explain why some news have more shares whiles others dont. Without transformation, throw all variables into a lm function will only give you .02 R squared. Which indicates irrelevant information been used. After transformation and variable selection, I can at best increase the R squared to around 0.2. So I think this data set is not appropriate to analyze news popularity, more information needed, which make sense because all these data are from superficial text mining results. They are very general and we know that, people like to share different news at different time according to many other events occuring all over the world, so without the variable measuring the media environment, it is hard to believe there is a general rule that one kind of article will draw more attention than others.
+
+Thanks for reading!
+
